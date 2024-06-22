@@ -1,0 +1,64 @@
+---
+- name: setup project bastion host
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks: 
+    - name: Import VPC Variables
+      include_vars: vars/vpc_setup
+
+    - name: Import VPC Variables
+      include_vars: vars/output_vars
+
+    - name: create a new ec2 key pair
+      ec2_key:
+        name: sample
+        region: "{{region}}"
+      register: keyout
+      
+    - debug:
+        var: keyout
+
+    - name: store login key
+      copy:
+        content: "{{keyout.key.private_key}}"
+        dest: ./sample-key.pem
+        mode: 0600
+      when: keyout.changed           
+
+    - name: create SG for bastion
+      ec2_group:
+        name: Bastion-host-sg
+        description: Allow port 22 from every where
+        region: "{{region}}"
+        vpc_id: "{{vpcid}}"
+        rules:
+          - protocol: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: "{{MYIP}}"
+        register: BastionSG_out
+
+    - name: create bastion host
+      ec2:
+        key_name: sample
+        region: "{{region}}"
+        instance_type: t2.micro
+        image: "{{bastion_ami}}"
+        wait: yes
+        wait_time: 300
+        instance_tags:
+          Name: "bastion_host"
+        exact_count: 1
+        count_tag:
+          Name: "bastion_host"
+        group_id: "{{BastionSG_out.group_id}}"
+        vpc_subnet_id: "{{pubsub1id}}"
+      register: bastionHost_out              
+
+    - name: insert/update "bastionSGid" in vars/output_vars
+      blockinfile:
+        path: vars/output_vars
+        backup: yes
+        block: |
+          BastionSGid: {{BastionSG_out.group_id}}  
